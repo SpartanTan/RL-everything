@@ -1,0 +1,10 @@
+{
+    // "python.pythonPath": "~/miniconda3/envs/ros2_env/bin/python ",
+    "python.linting.pylintArgs": [
+        "--extension-pkg-whitelist=pygame",// comma separated
+        "--generate-members=numpy.* ,torch.*" 
+    ],
+    "python.analysis.extraPaths": [
+        "./gym-examples"
+    ]
+}   

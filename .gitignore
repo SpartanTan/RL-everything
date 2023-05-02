@@ -1,0 +1,10 @@
+Gymnasium/
+*.pyc
+
+runs/
+videos/
+build/
+install/
+log/
+.vscode/
+gym-examples/
