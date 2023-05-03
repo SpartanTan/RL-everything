@@ -24,7 +24,7 @@ def make_env(gym_id, seed, idx, capture_video, run_name):
             env = gym.wrappers.RecordEpisodeStatistics(env)
             if capture_video:
                 if idx == 0:
-                    env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger=lambda x: x % 1000 == 0)
+                    env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
             # env.seed(args.seed)
             env.action_space.seed(seed)
             env.observation_space.seed(seed)
@@ -47,7 +47,7 @@ def parse_args():
     parser.add_argument('--torch-deterministic', type=lambda x:bool(strtobool(x)), default=True, nargs='?', const=True, help='if toggled, `torch.backends.cudnn.deterministic=False`')
     parser.add_argument('--cuda', type=lambda x:bool(strtobool(x)), default=False, nargs='?', const=True, help='if toggled, cuda will not be enabled by default')
     # parser.add_argument('--track', type=lambda x:bool(strtobool(x)), default=False, nargs='?', const=True, help='if toggled, the experiment will be tracked with Weights and Biases')
-    parser.add_argument('--capture-video', type=lambda x: bool(strtobool(x)), default=False, help="whether to capture videos of the agent performances")
+    parser.add_argument("--capture-video", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True, help="weather to capture videos of the agent performances (check out `videos` folder)")
     parser.add_argument('--num-envs', type=int, default=4, help="the number of parallel game environments to run")
     parser.add_argument('--num-steps', type=int, default=128, help="the number of steps per game environment to run")
     parser.add_argument('--anneal-lr', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True, help="Toggle learning rate annealing for policy and value networks")
@@ -55,13 +55,14 @@ def parse_args():
     parser.add_argument('--gamma', type=float, default=0.99, help="discount factor gamma")
     parser.add_argument('--gae-lambda', type=float, default=0.95, help="lambda for GAE")
     parser.add_argument('--num-minibatches', type=int, default=4, help="the number of mini-batches per update")
-    parser.add_argument('--update-epoches', type=int, default=4, help="the K epochs to update the policy")
+    parser.add_argument('--update-epochs', type=int, default=4, help="the K epochs to update the policy")
     parser.add_argument('--norm-adv', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True, help="Toggle advantage normalization")
     parser.add_argument('--clip-coef', type=float, default=0.2, help="the surrogate clipping coefficient")
     parser.add_argument('--clip-vloss', type=lambda x: bool(strtobool(x)), default=True, nargs='?', const=True, help="Toggle clipping of the value function loss")
     parser.add_argument('--ent-coef', type=float, default=0.01, help="coefficient of the entropy loss") # c2 in the paper
     parser.add_argument('--vf-coef', type=float, default=0.5, help="coefficient of the value function loss") # c1 in the paper
     parser.add_argument('--max-grad-norm', type=float, default=0.5, help="the maximum norm for the gradient clipping")
+    parser.add_argument('--target-kl', type=float, default=None, help="the target KL divergence threashold")
     
     args = parser.parse_args()
     args.batch_size = int(args.num_envs * args.num_steps) # 4 * 128 = 512
@@ -122,7 +123,7 @@ class Agent(nn.Module):
 
 if __name__ == "__main__":
     args = parse_args()
-    # print(args)
+    
     run_name = f"{args.gym_id}_{args.exp_name}_{args.seed}_{int(time.time())}"
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
@@ -205,7 +206,7 @@ if __name__ == "__main__":
     #  env4|| obs1 | obs2 | obs3 | obs4 
     next_obs, info = envs.reset() # notice that `info` is {}
     next_obs = torch.tensor(next_obs).to(device) # [env_num x obs_number] -> [4 x 4] 
-    next_done = torch.tensor(args.num_envs).to(device) # [4]
+    next_done = torch.zeros(args.num_envs).to(device) # [4]
     num_updates = args.total_timesteps // args.batch_size
     print(num_updates)
     # print("next_obs.shape", next_obs.shape)
@@ -225,6 +226,7 @@ if __name__ == "__main__":
             optimizer.param_groups[0]["lr"] = lrnow
         
         # Policy rollout
+        # 4 envs, 128 steps in one rollout
         for step in range(0, args.num_steps):
             # store the initial observation
             global_step += 1 * args.num_envs # 4 steps in global in one step
@@ -238,6 +240,7 @@ if __name__ == "__main__":
             logprobs[step] = logprob
             
             next_obs, reward, done, truncated, info = envs.step(action.cpu().numpy())
+            
             rewards[step] = torch.tensor(reward).to(device).view(-1) # store the reward from each step in each env
             next_obs, next_done = torch.tensor(next_obs).to(device), torch.tensor(done).to(device) # [1 x 4]
 
@@ -249,7 +252,7 @@ if __name__ == "__main__":
                         writer.add_scalar("charts/episodic_return", element['episode']['r'], global_step)
                         writer.add_scalar("charts/episodic_length", element['episode']['l'], global_step)
                         break
-            
+
         # boostrap values if not done
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1) # from [n_envs x 1]-> [1 x n_envs]
@@ -262,11 +265,12 @@ if __name__ == "__main__":
                         # since it is the last step, the "done" signal is from the last step
                         # after this operaion, 1 will be on the position where the last step is not done
                         # The not done episode can be learned
-                        nextnonterminal = 1.0 - next_done
+                        next_done = next_done.to(torch.int)
+                        nextnonterminal = 1 - next_done
                         # the next value is also from the last step. e.g. 
                         nextvalues = next_value
                     else:
-                        nextnonterminal = 1.0 - dones[t+1]
+                        nextnonterminal = 1 - dones[t+1]
                         nextvalues = values[t+1]
                     delta = rewards[t] + args.gamma * nextvalues * nextnonterminal - values[t]
                     advantages[t] = lastgaelam = delta + args.gamma * args.gae_lambda * nextnonterminal * lastgaelam
@@ -293,6 +297,7 @@ if __name__ == "__main__":
         b_values = values.reshape(-1) # [512]
         
         b_inds = np.arange(args.batch_size)
+        clipfracs = []
         # each update do 4 epochs
         for epoch in range(args.update_epochs):
             # each epoch do 4 minibatches, each minibatch do 128 steps
@@ -302,6 +307,7 @@ if __name__ == "__main__":
                 mb_inds = b_inds[start:end]
                 
                 _, newlogproba, entropy, newvalues = agent.get_action_and_value(b_obs[mb_inds], b_actions[mb_inds])
+                # newvalues: [128 x 1]
                 # log(P1/P2) = log(P1) - log(P2)
                 logratio = newlogproba - b_logprobs[mb_inds] # new/old
                 ratio = logratio.exp() # e^(log(P1/P2)) = P1/P2
@@ -314,7 +320,8 @@ if __name__ == "__main__":
                     old_approx_kl = (-logratio).mean()
                     # but joscha suggests a better estimator
                     approx_kl = ((ratio - 1.0) - logratio).mean()
-                
+                    clipfracs += [((ratio - 1.0).abs() > args.clip_coef).float().mean()]
+                    
                 mb_advantages = b_advantages[mb_inds]
                 if args.norm_adv:
                     mb_advantages = (mb_advantages - mb_advantages.mean()) / (mb_advantages.std() + 1e-8)
@@ -330,7 +337,7 @@ if __name__ == "__main__":
                 # unclipped loss: L^VF = E[(V - V_target)^2]
                 # clipped V: clip(V-V_target, -coef, coef) + V_target
                 # clipped loss: (v_clipped - V_target)^2
-                newvalues = newvalues.view(-1) # size: [n_envs]
+                newvalues = newvalues.view(-1) # size: [minibatch_size]->[128] e.g. [1.1 -2.3 -1.3 ...]
                 if args.clip_vloss:
                     v_loss_unclipped = (newvalues - b_returns[mb_inds]) ** 2
                     v_clipped = b_values[mb_inds] + torch.clamp(newvalues - b_returns[mb_inds], -args.clip_coef, args.clip_coef)
@@ -338,7 +345,7 @@ if __name__ == "__main__":
                     v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
                     v_loss = 0.5 * v_loss_max.mean()
                 else:
-                    v_loss = 0.5 * ((newvalues - b_returns[mb_inds]) ** 2).mean()
+                    v_loss = 0.5 * ((newvalues - b_returns[mb_inds]) ** 2).mean() # scalar
                     
                 
                 entropy_loss = entropy.mean()
@@ -350,3 +357,26 @@ if __name__ == "__main__":
                 loss.backward()
                 nn.utils.clip_grad_norm_(agent.parameters(), args.max_grad_norm)
                 optimizer.step()
+            
+            # batch-level early stopping
+            if args.target_kl is not None:
+                if approx_kl > args.target_kl:
+                    break
+            
+        y_pred, y_true = b_values.cpu().numpy(), b_returns.cpu().numpy()
+        var_y = np.var(y_true)
+        explained_var = np.nan if var_y == 0 else 1 - np.var(y_true - y_pred) / var_y # tells if value function is a good indicator of the returns
+        
+        writer.add_scalar("charts/learning_rate", optimizer.param_groups[0]['lr'], global_step)
+        writer.add_scalar("losses/value_loss", v_loss.item(), global_step) # .item() take the scalar value out of the tensor
+        writer.add_scalar("losses/policy_loss", pg_loss.item(), global_step)
+        writer.add_scalar("losses/entropy", entropy_loss.item(), global_step)
+        writer.add_scalar("losses/approx_kl", approx_kl.item(), global_step)
+        writer.add_scalar("losses/clipfrac", np.mean(clipfracs), global_step)
+        writer.add_scalar("debug/explained_variance", explained_var, global_step)
+        writer.add_scalar("debug/advantage_mean", advantages.mean().item(), global_step)
+        print("SPS:", int(global_step / (time.time() - start_time)))
+        writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
+        
+    envs.close()
+    writer.close()
