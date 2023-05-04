@@ -1,0 +1,31 @@
+{
+    "Nodes": 
+    [
+        {"id": 1,  "position": [ 0.66, 5.09, 0.0], "name": "CharSt_1", "description": "Charging station located at the s-east"}, 
+        {"id": 2,  "position": [ 0.66, 5.91, 0.0], "name": "CharSt_2", "description": "Charging station located at the s-east"},
+        {"id": 3,  "position": [10.31, 6.06, 0.0], "name": "DelvSt_1", "description": "Delivering station located at the s-west"},
+        {"id": 4,  "position": [11.69, 3.68, 0.0], "name": "CharSt_3", "description": "Charging station located at the n-west"},
+        {"id": 5,  "position": [10.31, 2.61, 0.0], "name": "DelvSt_2", "description": "Delivering station located at the n-west"},
+        {"id": 6,  "position": [ 5.44, 3.56, 0.0], "name": "LoadSt_1", "description": "Loading station located at the north"},
+        {"id": 7,  "position": [ 3.83, 3.56, 0.0], "name": "LoadSt_2", "description": "Loading station located at the north"},
+        {"id": 8,  "position": [ 2.53, 5.09, 0.0], "name": "IntrCh_1", "description": "Intersection to Charging station 1"},
+        {"id": 9,  "position": [ 2.53, 5.91, 0.0], "name": "IntrCh_2", "description": "Intersection to Charging station 2"},
+        {"id": 10, "position": [ 8.18, 5.91, 0.0], "name": "IntrExit", "description": "Intersection to the exit bay"},
+        {"id": 11, "position": [10.31, 3.68, 0.0], "name": "IntrCh_3", "description": "Intersection to Charging station 3"},
+        {"id": 12, "position": [ 8.49, 2.43, 0.0], "name": "ParkSt_1", "description": "Parking Station 1"},
+        {"id": 13, "position": [ 8.18, 3.56, 0.0], "name": "IntrPark", "description": "Intersection to Parking Station"},
+        {"id": 14, "position": [ 2.53, 3.56, 0.0], "name": "Corner_1", "description": "Corner Located at n-east"},
+        {"id": 15, "position": [ 9.21, 4.69, 0.0], "name": "ParkSt_2", "description": "Parking Station 2"}
+    ],
+    "Paths": 
+    [ 
+        {"id": 1, "graph": [1, 8, 14, 6, 13, 12, 5, 11]},
+        {"id": 2, "graph": [4, 11, 3, 10, 9, 8, 14, 7, 6, 13, 10, 3, 11, 4]},
+        {"id": 3, "graph": [2, 9, 10, 15, 13, 6, 7, 14, 8, 9, 2]},
+        {"id": 4, "graph": [15, 13, 11, 3, 10, 15]}
+    ],
+    "Backup":
+    [
+        {"id": 1, "graph": [1, 8, 14, 6, 13, 12, 5, 11, 13, 10, 9, 8, 1]}
+    ]
+}
