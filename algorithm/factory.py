@@ -62,6 +62,7 @@ class FactoryEnv(gym.Env):
         >>> target_location = self._get_obs()["target"]
         (3,4)
         """
+        
         return {"agent": self._agent_location, "target": self._target_location}
     
     def _get_info(self) -> dict:
@@ -114,6 +115,9 @@ class FactoryEnv(gym.Env):
         direction = self._action_to_direction[action]
         self._agent_location = self._agent_location + direction
 
+        
+        
+        
         min_values = np.array([0,0])
         max_values = np.array([self.height_bound, self.width_bound])
         outofbound_terminated = not (np.all((self._agent_location >= min_values) & (self._agent_location <= max_values)))
