@@ -111,6 +111,8 @@ class Path():
     def generate_path(self):
         self.generate_waypoints_not_back(self.Nw, self.Lp)
         path, self.obstacles = self.generate_path_colav_environment(self.No, self.Nw, self.Lp, self.mu_r, self.sigma_d)
+        self.obstacles_np = np.array([list(t[0]) + [t[1]] for t in self.obstacles])
+
         # Calculate even trajectory points
         t = np.linspace(0, 1, 1000)
         dt = t[1] - t[0]
@@ -298,10 +300,27 @@ class Path():
             # print(f"noraml way: {min_distance, self.walls[closest_trajectory_index][closest_point_index]}")
             return min_distance, self.walls[closest_trajectory_index][closest_point_index]
     
+    def is_waypoints_in_obstacles(self):
+        """
+        Check if the waypoints are in the obstacles
+        ### Returns
+        - `is_in_obstacles`: False if not in obstacles, True if in obstacles
+        """
+        for i in range(self.waypoints.shape[0]):
+            for j in range(self.obstacles_np.shape[0]):
+                dist = np.sqrt((self.waypoints[i, 0] - self.obstacles_np[j, 0])**2 + (self.waypoints[i, 1] - self.obstacles_np[j, 1])**2)
+                if dist < self.obstacles_np[j, 2]:
+                    return True
+        return False
+
+
     def is_crossed(self):
         """
         Check if the trajectory is crossed with the walls. Also check if the start and end lines cross trajectory.
         But it cannot avoid the crossing of one trajectory itself.
+
+        ### Returns
+        - `crossing`: False if not crossed, True if crossed
         """
         line1 = LineString(self.even_trajectory)
         line2 = LineString(self.wall_up)
@@ -439,6 +458,7 @@ class Path():
         print(f"length of the reference trajectory: {round(self.trajectory_length_at_each_point[-1], 3)} m")
         print(f"shape of trajectory_length_at_each_point: {self.trajectory_length_at_each_point.shape}")
         print(f"shape of yaw_angles: {self.yaw_angles.shape}")
+        print(f"shape of obstacles in ndarray format: {self.obstacles_np.shape}")
         print(f"number of obstacles: {len(self.obstacles)}")
         print(f"shape of walls: {self.wall_up.shape}")
         # print("")
@@ -449,8 +469,10 @@ class Path():
         self.generate_walls()
         if self.is_crossed():
             self.reset()
-        
-if __name__ == "__main__":       
+        if self.is_waypoints_in_obstacles():
+            self.reset()
+
+if __name__ == "__main__":             
     testPath = Path(trajectory_point_interval=0.1,
                     No=12, Nw=8, Lp=15, mu_r=0.25, sigma_d=0.8, shift_distance=1)
     testPath.reset()
@@ -458,9 +480,3 @@ if __name__ == "__main__":
     testPath.print_shape()
     endtime = time.time()
     print(f"Time used: {endtime - starttime}")
-
-    # atr_position = np.array([testPath.waypoints[3,0], testPath.waypoints[3, 1]])
-    # print(atr_position)
-    # min_distance, closest_point = testPath.minimum_distance_to_walls(atr_position)
-    # plt.scatter(atr_position[0], atr_position[1], s=100, marker='+', label='Query Point')
-    # plt.scatter(closest_point[0], closest_point[1], s=50, marker='+', label='Closest Point')
