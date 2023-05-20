@@ -23,11 +23,11 @@ WHEEL_RADIUS = 0.125  # Wheel radius
 
 # Cost factors
 class C:
-    K_OFFSET = 3.5
+    K_OFFSET = 4.2 # 3.5
     K_COLLISION = 1000.0
     K_walked_distance = -2
-    K_distance_to_goal = 4
-    K_distance_to_obs = 0.0
+    K_distance_to_goal = 4 # 4
+    K_distance_to_obs = 0.0 # 0.0
 
 # Define a path class for convenience
 class LPath:
@@ -45,7 +45,7 @@ class LPath:
 def is_path_collision(path, obstacles):
     for i in range(len(path.x)):
         for obs in obstacles:
-            if np.hypot(path.x[i] - obs[0], path.y[i] - obs[1]) <= obs[2]:
+            if np.hypot(path.x[i] - obs[0], path.y[i] - obs[1]) <= (obs[2]+0.07):
                 return True
     return False
 
@@ -94,11 +94,15 @@ def sample_paths_diff_drive_robot(v_left_set, v_right_set, initial_state, dt, N,
             path.collision = collision
             distance_to_goal = np.hypot(x - goal[0], y - goal[1])
             distance_to_obs = distance_to_obstacles(last_point, obstacles)
+            if  path.walked_distance == 0:
+                not_walking_penalty = 20
+            else:
+                not_walking_penalty = 0
             path.cost = C.K_OFFSET * distance + \
                         C.K_COLLISION * collision + \
                         C.K_walked_distance * path.walked_distance + \
                         C.K_distance_to_goal * distance_to_goal + \
-                        C.K_distance_to_obs * 1/distance_to_obs
+                        C.K_distance_to_obs * 1/distance_to_obs + not_walking_penalty
 
             path.end_distance = distance
             PATHS.append(path)
@@ -177,5 +181,5 @@ if __name__ == "__main__":
                 break
             goal = [testPath.waypoints[goal_index][0], testPath.waypoints[goal_index][1]]
                 
-        plt.pause(0.001)
+        plt.pause(0.0005)
     
