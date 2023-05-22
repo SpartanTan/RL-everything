@@ -5,6 +5,11 @@ from shapely.geometry import Point, LineString
 from IPython.display import display, clear_output
 from RK4 import ATR_RK4
 import math
+import time
+import os
+
+start_time = time.time()
+
 # max speed of ATR, 1m/s
 # 8 rad/s 
 
@@ -18,16 +23,16 @@ v_left_set = np.concatenate(([-0.2, 0], v_left_set))
 v_right_set = np.concatenate(([-0.2, 0], v_right_set))
 
 dt = 0.1  # Time step
-N = 50  # Number of steps
+N = 100  # Number of steps
 WHEEL_RADIUS = 0.125  # Wheel radius
 TRACK_WIDTH = 0.48 # track width
 
 # Cost factors
 class C:
-    K_OFFSET = 50 # 3.5
+    K_OFFSET = 20 # 3.5
     K_COLLISION = 1000.0
     K_walked_distance = -10
-    K_distance_to_goal = 0.1 # 4
+    K_distance_to_goal = 4 # 4
     K_distance_to_obs = 1.0 # 0.0
 
 # Define a path class for convenience
@@ -205,6 +210,8 @@ if __name__ == "__main__":
             plt.show()
             break
             # goal = [testPath.waypoints[goal_index][0], testPath.waypoints[goal_index][1]]
-                
+        elapsed_time = time.time() - start_time
+        os.system('clear')
+        print(f"Elapsed time: {elapsed_time} seconds")       
         plt.pause(0.0005)
     
