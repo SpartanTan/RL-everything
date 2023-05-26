@@ -8,3 +8,7 @@ install/
 log/
 .vscode/
 gym-examples/
+data/
+*.pth
+
+
