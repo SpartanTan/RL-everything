@@ -146,8 +146,10 @@ def find_closest_point_on_line(point, ref_path):
 
     return closest_point_on_line, distance
 
+STUCK_COUNT = 0
 
 def select_optimal_path(paths):
+    global STUCK_COUNT
     min_cost = float('inf')
     optimal_path = None
     optimal_index = 0
@@ -157,21 +159,30 @@ def select_optimal_path(paths):
             min_cost = path.cost
             optimal_path = path
             optimal_index = idx
+
     # print(f"optimal path vel: {optimal_path.v}")
     if optimal_path.v <= 0.02:
         print("select random path")
         optimal_index = np.random.randint(len(paths))
         optimal_path = paths[optimal_index]
+        STUCK_COUNT += 1
+        C.K_OFFSET -= 0.2
+        if C.K_OFFSET < 0:
+            C.K_OFFSET = 0    
+    else:
+        if STUCK_COUNT > 0:
+            STUCK_COUNT -= 1
+        if STUCK_COUNT < 5:
+            C.K_OFFSET = 20
     
     return optimal_path, optimal_index
 
 
 if __name__ == "__main__":
     testPath = Path(trajectory_point_interval=0.1,
-                    No=12, Nw=8, Lp=15, mu_r=0.25, sigma_d=0.8, shift_distance=1)
+                    No=8, Nw=8, Lp=6, mu_r=0.25, sigma_d=0.8, shift_distance=1)
     testPath.reset()
     testPath.render()
-
 
     state = [testPath.waypoints[0][0], testPath.waypoints[0][1], testPath.yaw_angles[0]]
     atr = ATR_RK4(init_state=state, dt=dt)
