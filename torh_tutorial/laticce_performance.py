@@ -55,6 +55,7 @@ class LPath:
         self.walked_distance = 0.0
         self.cost = 0
         self.collision = False
+        self.lock_goal = False
 
 def is_path_collision(path, obstacles):
     for i in range(len(path.x)):
@@ -125,10 +126,11 @@ def sample_paths_diff_drive_robot(v_left_set, v_right_set, initial_state, dt, N,
             if distance_to_goal <= 0.2:
                 distance_to_goal == 0.2
                 approach_goal = True
+                path.lock_goal = True
             if approach_goal:
-                mul_scale = np.abs([ int(0.8*scale/ (v_left+0.001)), int(0.8*scale / (v_right+0.001))])
+                mul_scale = np.abs([0.8*scale/ (v_left+0.001), 0.8*scale / (v_right+0.001)])
                 mul_scale = np.min(mul_scale)
-                if mul_scale > 1:
+                if mul_scale >= 1:
                     path.v_left = v_left * mul_scale
                     path.v_right = v_right * mul_scale
             distance_to_goal = distance_to_goal / 10.0
@@ -143,8 +145,6 @@ def sample_paths_diff_drive_robot(v_left_set, v_right_set, initial_state, dt, N,
                         C.K_walked_distance * path.walked_distance + \
                         C.K_distance_to_goal * distance_to_goal + \
                         C.K_distance_to_obs * 1/distance_to_obs + not_walking_penalty
-            # if approach_goal:
-            #     path.cost = C.K_walked_distance * path.walked_distance + C.K_COLLISION * collision
 
             path.end_distance = distance_on_line
             path.v = v
@@ -184,7 +184,7 @@ def select_optimal_path(paths):
             optimal_index = idx
 
     # print(f"optimal path vel: {optimal_path.v}")
-    if optimal_path.v / scale <= 0.02:
+    if not path.lock_goal and optimal_path.v / scale <= 0.02:
         print("select random path")
         optimal_index = np.random.randint(len(paths))
         optimal_path = paths[optimal_index]
