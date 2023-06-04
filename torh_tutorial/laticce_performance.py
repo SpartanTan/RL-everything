@@ -7,6 +7,7 @@ from RK4 import ATR_RK4
 import math
 import time
 import os
+import cProfile
 
 
 # max speed of ATR, 1m/s
@@ -36,7 +37,7 @@ class C:
 
 # Define a path class for convenience
 class LPath:
-    def __init__(self):
+    def __init__(self, N=100):
         self.x = []
         self.y = []
         self.theta = []
@@ -70,16 +71,17 @@ def sample_paths_diff_drive_robot(v_left_set, v_right_set, initial_state, dt, N,
         for v_right in v_right_set:
             # if v_left == 0 and v_right == 0:
             #     continue
-            path = LPath()
+            path = LPath(N)
             atr.reset(initial_state)
             x, y, theta = initial_state
-
+            v_right = v_right * 1
+            v_left = v_left * 1
             # Calculate linear and angular velocities from wheel speeds
 
             v = (v_right*WHEEL_RADIUS + v_left*WHEEL_RADIUS) / 2
             w = WHEEL_RADIUS * (v_right - v_left) / TRACK_WIDTH
             for i in range(N):
-                atr.runge_kutta_4_step([v_right, v_left])
+                atr.runge_kutta_4_step([v_right, v_left], "simple")
                 x = atr.state[0]
                 y = atr.state[1]
                 theta = atr.state[2]
@@ -87,7 +89,6 @@ def sample_paths_diff_drive_robot(v_left_set, v_right_set, initial_state, dt, N,
                 path.x.append(x)
                 path.y.append(y)
                 path.theta.append(theta)
-
             path.walked_distance = np.hypot(x - initial_state[0], y - initial_state[1])
             path.v_left = v_left
             path.v_right = v_right
@@ -176,10 +177,45 @@ def select_optimal_path(paths):
     
     return optimal_path, optimal_index
 
+def loop_body(state, goal, testPath, atr, path_obs, trajectory, goal_index):
+    sample_start = time.time()
+    paths = sample_paths_diff_drive_robot(v_left_set, v_right_set, state, dt, N, testPath.even_trajectory, path_obs, goal, atr)
+    sample_end = time.time()
+    print(f"sample spent: {sample_end - sample_start}")
+    optimal_path, optimal_path_index = select_optimal_path(paths)
+    v_left_optimal = optimal_path.v_left
+    v_right_optimal = optimal_path.v_right
+    # state = atr.runge_kutta_4_step([v_right_optimal, v_left_optimal], "simple")[0]
+    state = [state[0], state[1], state[2]]
+    state = [optimal_path.x[1], optimal_path.y[1], optimal_path.theta[1]]
+    trajectory.append(state)
+    plt.cla()
+    testPath.render()
+    plt.scatter(state[0], state[1], color='green', s=10)
+    for path in paths:
+        plt.plot(path.x, path.y, color='gray', alpha=0.1)
 
-if __name__ == "__main__":
+    plt.plot(optimal_path.x, optimal_path.y, color='blue', linewidth=2)
+    plt.title("v :" + str(optimal_path.v)[0:4] + " m/s")
+    plt.title(f"v :{str(optimal_path.v)[0:4]} m/s")
+
+    if np.hypot(state[0] - goal[0], state[1] - goal[1]) < 0.2:
+        goal_index += 1
+        # if goal_index >= len(testPath.waypoints):
+        trajectory = np.array(trajectory)
+        plt.plot(trajectory[:, 0], trajectory[:, 1], color='red', linewidth=2)
+        plt.pause(5)
+        plt.show()
+        return state, False
+        # goal = [testPath.waypoints[goal_index][0], testPath.waypoints[goal_index][1]]
+    plt.pause(0.0005)
+    return state, True
+
+
+
+def run_loop():
     testPath = Path(trajectory_point_interval=0.1,
-                    No=8, Nw=8, Lp=6, mu_r=0.25, sigma_d=0.8, shift_distance=1)
+                No=8, Nw=8, Lp=6, mu_r=0.25, sigma_d=0.8, shift_distance=1)
     testPath.reset()
     testPath.render()
 
@@ -197,35 +233,11 @@ if __name__ == "__main__":
     trajectory = [state]
 
     start_time = time.time() 
+    keepgoing = True
     while True:
-        cstart = time.time()
-        paths = sample_paths_diff_drive_robot(v_left_set, v_right_set, state, dt, N, testPath.even_trajectory, path_obs, goal, atr)
-        optimal_path, optimal_path_index = select_optimal_path(paths)
-        
-        state = [optimal_path.x[1], optimal_path.y[1], optimal_path.theta[1]]
-        trajectory.append(state)
-        plt.cla()
-        testPath.render()
-        plt.scatter(state[0], state[1], color='green', s=10)
-        for path in paths:
-            plt.plot(path.x, path.y, color='gray', alpha=0.1)
-
-        plt.plot(optimal_path.x, optimal_path.y, color='blue', linewidth=2)
-        plt.title("v :" + str(optimal_path.v)[0:4] + " m/s")
-        plt.title(f"v :{str(optimal_path.v)[0:4]} m/s, comptime: {round(time.time() - cstart, 3)} s")
-
-        if np.hypot(state[0] - goal[0], state[1] - goal[1]) < 0.2:
-            goal_index += 1
-            # if goal_index >= len(testPath.waypoints):
-            trajectory = np.array(trajectory)
-            plt.plot(trajectory[:, 0], trajectory[:, 1], color='red', linewidth=2)
-            plt.pause(5)
-            plt.show()
+        state, keepgoing = loop_body(state, goal, testPath, atr, path_obs, trajectory, goal_index)
+        if not keepgoing:
             break
-            # goal = [testPath.waypoints[goal_index][0], testPath.waypoints[goal_index][1]]
-        elapsed_time = time.time() - start_time
-        computation_time = time.time() - cstart
-        os.system('clear')
-        print(f"Elapsed time: {elapsed_time} seconds")       
-        plt.pause(0.0005)
-    
+
+# cProfile.run('run_loop()')
+run_loop()

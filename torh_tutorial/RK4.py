@@ -30,26 +30,40 @@ class ATR_RK4():
 
         return np.array([dx, dy, dtheta])
 
-    def runge_kutta_4_step(self, wheel_speeds:list):
+    def runge_kutta_4_step(self, wheel_speeds:list, method:str="RK4"):
         """
         simulate the robot's movement
         
         ### Parameters
         - `wheel_speeds`: [wr, wl]. Note that the sequnece of input is [right, left], however the algorithm
         used here is [left, right], so have to switch the input first. 
-        """
-        # switch wheel speed sequence
-        wheel_speeds = [wheel_speeds[1], wheel_speeds[0]]
         
-        k1 = self.robot_pose_derivative(self.state, wheel_speeds)
-        k2 = self.robot_pose_derivative(self.state + self.dt / 2 * k1, wheel_speeds)
-        k3 = self.robot_pose_derivative(self.state + self.dt / 2 * k2, wheel_speeds)
-        k4 = self.robot_pose_derivative(self.state + self.dt * k3, wheel_speeds)
+        ### Returns
+        - `state`: [x, y, theta]
+        - `linear_velocity`: linear velocity m/s
+        - `angular_velocity`: angular velocity rad/s
+        """
+        
+        # switch wheel speed sequence
+        wheel_speeds = [wheel_speeds[1], wheel_speeds[0]] # now wheel_speed is [wl, wr]
+        left_wheel_speed, right_wheel_speed = wheel_speeds
+        linear_velocity = self.wheel_radius * (left_wheel_speed + right_wheel_speed) / 2
+        angular_velocity = self.wheel_radius * \
+            (right_wheel_speed - left_wheel_speed) / self.track_width
+        if method == "simple":
+            k1 = self.robot_pose_derivative(self.state, wheel_speeds)
+            self.state = self.state + self.dt * k1
+            return np.copy(self.state), linear_velocity, angular_velocity
+        else:  
+            k1 = self.robot_pose_derivative(self.state, wheel_speeds)
+            k2 = self.robot_pose_derivative(self.state + self.dt / 2 * k1, wheel_speeds)
+            k3 = self.robot_pose_derivative(self.state + self.dt / 2 * k2, wheel_speeds)
+            k4 = self.robot_pose_derivative(self.state + self.dt * k3, wheel_speeds)
 
-        self.state = self.state + self.dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
-        x_normalized = np.arctan2(np.sin(self.state[2]), np.cos(self.state[2]))
-        self.state[2] = x_normalized
-        return np.copy(self.state)
+            self.state = self.state + self.dt / 6 * (k1 + 2 * k2 + 2 * k3 + k4)
+            x_normalized = np.arctan2(np.sin(self.state[2]), np.cos(self.state[2]))
+            self.state[2] = x_normalized
+            return np.copy(self.state), linear_velocity, angular_velocity
     
     def reset(self, position:np.ndarray):
         self.state = position
