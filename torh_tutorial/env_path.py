@@ -7,6 +7,7 @@ from scipy.interpolate import CubicSpline
 from scipy.integrate import cumtrapz
 from scipy.spatial import cKDTree
 from shapely.geometry import Polygon, Point, LineString
+import pickle
 
 np.seterr(all='ignore')
 np.set_printoptions(precision=3, suppress=True)
@@ -22,7 +23,7 @@ class Path():
                  sigma_d=0.8,
                  shift_distance=5.0,
                  extend_length = 2.0,
-                 look_ahead_distance=3.0):
+                 look_ahead_distance= 1.0):
         
         self.interval = trajectory_point_interval
         self.No=No
@@ -34,7 +35,7 @@ class Path():
         self.shift_distance = shift_distance
         self.extend_length = extend_length
         
-        self.look_ahead_distance = look_ahead_distance
+        self.look_ahead_distance = Lp * 0.2 #look_ahead_distance
     def generate_waypoints_not_back(self, Nw, Lp):
         """
         This method generates random waypoints that won't go back
@@ -117,7 +118,7 @@ class Path():
         t = np.linspace(0, 1, 1000)
         dt = t[1] - t[0]
         cumulative_arclength = np.cumsum(self.arc_length(path, t, dt))
-        point_distance = 0.1
+        point_distance = self.interval
         total_arclength = cumulative_arclength[-1]
         num_points = int(np.ceil(total_arclength / point_distance))
         even_t = np.zeros(num_points)
@@ -181,7 +182,7 @@ class Path():
         self.starting_indices = [0, len(self.wall_up), 
                     len(self.wall_up) + len(self.wall_down), 
                     len(self.wall_up) + len(self.wall_down) + len(self.start_line)]
-        self.kd_tree = cKDTree(self.walls_stack)
+        self.walls_kd_tree = cKDTree(self.walls_stack)
         
     def local_orthogonal_directions(self, points):
         """
@@ -265,23 +266,32 @@ class Path():
         line_points = np.array([(1 - t_i) * point_a + t_i * point_b for t_i in t])
         return line_points
 
-    def minimum_distance_to_walls(self, point, method: str = 'kdtree'):
+    def minimum_distance_to_walls(self, point, method: str = 'kdtree', num_of_closest_points=2):
         """
         Return the minimum distance to the nearest wall and that closest point
         
         ### Parameters
         - `point`: np.array([x, y])
         - `method`: str, 'kdtree' or 'normal'
+        - `num_of_closest_points`: int, number of closest points to query
         
         ### Returns
         - `min_distance`: float
-        - `closest_point`: np.array([x, y])
+        - `closest_points`: np.array([x, y])
+        
+        ### Example:
+        >>> point = np.array([0, 0])
+        >>> min_distance, closest_point = self.minimum_distance_to_walls(point)
         """
         if method == 'kdtree':
-            min_distance, index = self.kd_tree.query(point)
-            closest_trajectory_index = np.searchsorted(self.starting_indices, index, side="right") - 1
-            closest_point_index = index - self.starting_indices[closest_trajectory_index]
-            return min_distance, self.walls[closest_trajectory_index][closest_point_index]
+            min_distance, index = self.walls_kd_tree.query(point, num_of_closest_points) # (2,), (2,)
+            closest_trajectory_index = np.searchsorted(self.starting_indices, index, side="right") - 1    
+            # Convert to list for element-wise operation
+            closest_trajectory_index_list = closest_trajectory_index.tolist()
+            starting_indices_for_each_point = [self.starting_indices[i] for i in closest_trajectory_index_list]
+            closest_point_index = index - np.array(starting_indices_for_each_point)
+            closest_points = [self.walls[trajectory_index][point_index] for trajectory_index, point_index in zip(closest_trajectory_index_list, closest_point_index.tolist())]
+            return min_distance, closest_points
             # print(f"kdtree: {min_distance, self.walls[closest_trajectory_index][closest_point_index]}")
         elif method=='normal':        
             min_distance = float('inf')
@@ -367,22 +377,32 @@ class Path():
         is_inside = self.bounding_box_polygon.contains(Point(point))
         return is_inside
     
-    def calculate_error_vector(self, point: np.ndarray):
+    def calculate_error_vector(self, atr_state: np.ndarray):
         """
         This method will first check if the query point is within the area. 
         Then calculate the along-track error and cross-track error to the closest point 
         on the reference trajectory. This will also set the self.plot_error to True. Then the render() method
         will ploot the query_point and the errors.
+        This method will also return the look-ahead point and the yaw angle of the look-ahead point.
+        
+        ## TODO
+        - [ ] Add the yaw error
         
         ### Parameters
-        - `point`: np.array([x, y])
+        - `atr_state`: np.array([x, y, yaw_angle])
         
         ### Returns
-        - `eta`: np.array([s, x])
+        - `eta`: np.array([s, e])
         - `index`: int, index of the closest point on the trajectory
         - `target_point`: np.array([x, y]), the look ahead point on the trajectory
         - `target_point_yaw`: float, the yaw angle of the target point on the trajectory
+        
+        ### Example
+        >>> point = np.array([0, 0])
+        >>> eta, index, target_point, target_point_yaw, look_ahead_course_error, course_error = self.calculate_error_vector(point)
         """
+        point = atr_state[:2]
+        heading = atr_state[2]
         assert self.is_inside(point), "The query point is outside the boundary"
         min_distance, index = self.trejectory_kd_tree.query(point)
         # index = index +3 # shifted 3 points forward
@@ -400,9 +420,18 @@ class Path():
         self.plot_error = True
         # e_global = R @ e + closest_point # not needed
         index_of_look_ahead_point = int(index + self.look_ahead_distance / self.interval)
-        target_point = testPath.even_trajectory[index_of_look_ahead_point] 
-        target_point_yaw = testPath.yaw_angles[index_of_look_ahead_point]
-        return eta, index, target_point, target_point_yaw
+        if index_of_look_ahead_point >= len(self.even_trajectory):
+            index_of_look_ahead_point = len(self.even_trajectory) - 1
+        target_point = self.even_trajectory[index_of_look_ahead_point] 
+        target_point_yaw = self.yaw_angles[index_of_look_ahead_point]
+        # course_error is the course change needed for navigating straight towards to the look-ahead point
+        course_error = np.arctan2(target_point[1] - point[1], target_point[0] - point[0]) - heading
+        # make sure it is in the range of [-pi, pi]
+        course_error = np.remainder(course_error + np.pi, 2 * np.pi) - np.pi
+        # look_ahead_course_error is the course difference between look-ahead point yaw and the current heading
+        look_ahead_course_error = target_point_yaw - heading
+        look_ahead_course_error = np.remainder(look_ahead_course_error + np.pi, 2 * np.pi) - np.pi
+        return eta, index, target_point, target_point_yaw, look_ahead_course_error, course_error
         
     def render(self, if_yaw_angle=False):
         # plot waypoints
@@ -471,12 +500,3 @@ class Path():
             self.reset()
         if self.is_waypoints_in_obstacles():
             self.reset()
-
-if __name__ == "__main__":             
-    testPath = Path(trajectory_point_interval=0.1,
-                    No=12, Nw=8, Lp=15, mu_r=0.25, sigma_d=0.8, shift_distance=1)
-    testPath.reset()
-    testPath.render(if_yaw_angle=True)
-    testPath.print_shape()
-    endtime = time.time()
-    print(f"Time used: {endtime - starttime}")
