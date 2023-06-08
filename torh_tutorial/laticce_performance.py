@@ -356,4 +356,4 @@ def run_loop(oldPath=False):
         plt.pause(computation_time)
 
 if __name__ == "__main__":
-    run_loop(True)
+    run_loop(oldPath=False)
