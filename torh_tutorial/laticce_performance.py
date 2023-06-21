@@ -353,7 +353,7 @@ def run_loop(oldPath=False):
         pause_time = dt - computation_time
         if pause_time < 0:
             pause_time = 0
-        plt.pause(computation_time)
+        plt.pause(pause_time)
 
 if __name__ == "__main__":
     run_loop(oldPath=False)
