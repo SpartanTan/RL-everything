@@ -1,13 +1,14 @@
+import time
 import numpy as np
 import scipy.interpolate as interp
 import matplotlib.pyplot as plt
-import time
 from scipy.interpolate import interp1d
 from scipy.interpolate import CubicSpline
 from scipy.integrate import cumtrapz
 from scipy.spatial import cKDTree
 from shapely.geometry import Polygon, Point, LineString
 import pickle
+from factory_env.envs.parameters import path_param
 
 np.seterr(all='ignore')
 np.set_printoptions(precision=3, suppress=True)
@@ -15,27 +16,23 @@ np.set_printoptions(precision=3, suppress=True)
 starttime = time.time()
 class Path():
     def __init__(self,
-                 trajectory_point_interval=0.1,
-                 No=12,
-                 Nw=8,
-                 Lp=15,
-                 mu_r=0.25,
-                 sigma_d=0.8,
-                 shift_distance=5.0,
-                 extend_length = 2.0,
-                 look_ahead_distance= 1.0):
+                 params: path_param,
+                 ghost_max_vel=0.1,):
         
-        self.interval = trajectory_point_interval
-        self.No=No
-        self.Nw=Nw
-        self.Lp=Lp
-        self.mu_r=mu_r
-        self.sigma_d=sigma_d
+        self.interval=params.trajectory_point_interval
+        self.No=params.No
+        self.Nw=params.Nw
+        self.Lp=params.Lp
+        self.mu_r=params.mu_r
+        self.sigma_d=params.sigma_d
+        self.shift_distance=params.shift_distance
+        self.extend_length=params.extend_length
+        self.look_ahead_distance=params.look_ahead_distance # Lp * 0.2
+        self.target_finishing_time=params.target_finishing_time
+        self.atr_max_vel=ghost_max_vel
         
-        self.shift_distance = shift_distance
-        self.extend_length = extend_length
+        self.ref_point_index = 0
         
-        self.look_ahead_distance = Lp * 0.2 #look_ahead_distance
     def generate_waypoints_not_back(self, Nw, Lp):
         """
         This method generates random waypoints that won't go back
@@ -135,12 +132,31 @@ class Path():
         # Calculate the length of the trajectory at each point
         differences = np.linalg.norm(np.diff(self.even_trajectory, axis=0), axis=1)
         self.trajectory_length_at_each_point = np.cumsum(differences)
-        self.even_trajectory = self.even_trajectory[1:] # remove the first point in even_trajectory after calculate the trajectory length
+        self.trajectory_length_at_each_point = np.hstack((0, self.trajectory_length_at_each_point)) # add the first point in even_trajectory
+        
+        # self.even_trajectory = self.even_trajectory[1:] # remove the first point in even_trajectory after calculate the trajectory length
+        
+        # get ghost ATR trajectory
+        ghost_velocity = total_arclength / self.target_finishing_time
+        point_distance = ghost_velocity * self.interval
+        total_steps = int(np.ceil(total_arclength / point_distance))
+        even_atr_t = np.zeros(total_steps)
+        current_arclength = 0
+        for i in range(1, total_steps):
+            current_arclength += point_distance
+            even_atr_t[i] = np.interp(current_arclength, cumulative_arclength, t)
+        self.ghost_trajectory = path(even_atr_t)
+        self.ghost_trajectory = np.vstack((self.ghost_trajectory, self.waypoints[-1])) # add the last waypoint into even_trajectory
+        # self.ghost_trajectory = self.ghost_trajectory[1:]
         
         # Calculate yaw angles at each point
         path_derivative = path.derivative()(even_t)
         self.yaw_angles = np.arctan2(path_derivative[:, 1], path_derivative[:, 0])
+        self.yaw_angles = np.hstack((self.yaw_angles, self.yaw_angles[-1])) # add the last yaw angle into yaw_angles
         
+        path_derivative = path.derivative()(even_atr_t)
+        self.ghost_yaw_angles = np.arctan2(path_derivative[:, 1], path_derivative[:, 0])
+        self.ghost_yaw_angles = np.hstack((self.ghost_yaw_angles, self.ghost_yaw_angles[-1])) # add the last yaw angle into yaw_angles
     
     def generate_walls(self):
         """
@@ -150,17 +166,16 @@ class Path():
         # Shift the trajectories
         shifted_points_up, shifted_points_down = self.shift_trajectory_local(points, self.shift_distance)
         # Smooth and resample the shifted trajectories
-        target_distance = 0.1
+        target_distance = self.interval
         resampled_shifted_points_up, resampled_shifted_points_down = self.smooth_and_resample_trajectories(shifted_points_up, shifted_points_down, target_distance)
 
         # Extend the resampled trajectories
-        extend_length = 2
-        extended_resampled_shifted_points_up = self.extend_trajectory(resampled_shifted_points_up, extend_length)
-        extended_resampled_shifted_points_down = self.extend_trajectory(resampled_shifted_points_down, extend_length)
+        extended_resampled_shifted_points_up = self.extend_trajectory(resampled_shifted_points_up, self.extend_length)
+        extended_resampled_shifted_points_down = self.extend_trajectory(resampled_shifted_points_down, self.extend_length)
 
         # Create lines connecting the starting points and ending points
-        start_line = self.create_line_between_points(extended_resampled_shifted_points_up[0], extended_resampled_shifted_points_down[0], point_distance=0.1)
-        end_line = self.create_line_between_points(extended_resampled_shifted_points_up[-1], extended_resampled_shifted_points_down[-1], point_distance=0.1)
+        start_line = self.create_line_between_points(extended_resampled_shifted_points_up[0], extended_resampled_shifted_points_down[0], point_distance=self.interval)
+        end_line = self.create_line_between_points(extended_resampled_shifted_points_up[-1], extended_resampled_shifted_points_down[-1], point_distance=self.interval)
         
         self.wall_up = extended_resampled_shifted_points_up
         self.wall_down = extended_resampled_shifted_points_down
@@ -273,11 +288,11 @@ class Path():
         ### Parameters
         - `point`: np.array([x, y])
         - `method`: str, 'kdtree' or 'normal'
-        - `num_of_closest_points`: int, number of closest points to query
+        - `num_of_closest_points`: int, how many closest points on the walls are needed
         
         ### Returns
         - `min_distance`: float
-        - `closest_points`: np.array([x, y])
+        - `closest_points`: list
         
         ### Example:
         >>> point = np.array([0, 0])
@@ -319,10 +334,21 @@ class Path():
         for i in range(self.waypoints.shape[0]):
             for j in range(self.obstacles_np.shape[0]):
                 dist = np.sqrt((self.waypoints[i, 0] - self.obstacles_np[j, 0])**2 + (self.waypoints[i, 1] - self.obstacles_np[j, 1])**2)
-                if dist < self.obstacles_np[j, 2]:
+                if dist <= self.obstacles_np[j, 2]:
                     return True
         return False
-
+    
+    def is_atr_in_obstacles(self, atr_pos):
+        """
+        Check if atr hits the obstacles.
+        Retrun True if hit
+        """
+        x, y = atr_pos
+        for j in range(self.obstacles_np.shape[0]):
+                dist = np.sqrt((x - self.obstacles_np[j, 0])**2 + (y - self.obstacles_np[j, 1])**2)
+                if dist <= self.obstacles_np[j, 2]:
+                    return True
+        return False
 
     def is_crossed(self):
         """
@@ -376,8 +402,14 @@ class Path():
         """
         is_inside = self.bounding_box_polygon.contains(Point(point))
         return is_inside
+
+    def is_arrived(self, point):
+        if np.linalg.norm(point - self.waypoints[-1]) < self.interval / 2.0:
+            return True
+        else:
+            return False
     
-    def calculate_error_vector(self, atr_state: np.ndarray):
+    def calculate_error_vector(self, atr_state: np.ndarray, ghost_point: np.ndarray=None):
         """
         This method will first check if the query point is within the area. 
         Then calculate the along-track error and cross-track error to the closest point 
@@ -403,9 +435,19 @@ class Path():
         """
         point = atr_state[:2]
         heading = atr_state[2]
-        assert self.is_inside(point), "The query point is outside the boundary"
+        # assert self.is_inside(point), "The query point is outside the boundary"
+        
+        if ghost_point is not None:
+            pass
+        
         min_distance, index = self.trejectory_kd_tree.query(point)
-        # index = index +3 # shifted 3 points forward
+        if index < self.ref_point_index:
+            index = self.ref_point_index
+        else:
+            self.ref_point_index = index
+        index = index + 1 # shifted 3 points forward
+        if index >= len(self.even_trajectory):
+            index = len(self.even_trajectory) - 1
         self.closest_point_to_trajectory = self.even_trajectory[index]
         closest_point_yaw_angle = self.yaw_angles[index]
         R = np.array([[np.cos(closest_point_yaw_angle), -np.sin(closest_point_yaw_angle)],
@@ -431,43 +473,47 @@ class Path():
         # look_ahead_course_error is the course difference between look-ahead point yaw and the current heading
         look_ahead_course_error = target_point_yaw - heading
         look_ahead_course_error = np.remainder(look_ahead_course_error + np.pi, 2 * np.pi) - np.pi
+        
+        
         return eta, index, target_point, target_point_yaw, look_ahead_course_error, course_error
         
-    def render(self, if_yaw_angle=False):
+    def render(self, ax, if_yaw_angle=False):
         # plot waypoints
-        plt.scatter(self.waypoints[0,0], self.waypoints[0,1], s=100, c='k',  label="Start")
-        plt.scatter(self.waypoints[-1,0], self.waypoints[-1,1], s=100, c='r', label="End")
-        plt.scatter(self.waypoints[:, 0], self.waypoints[:, 1], c='b', marker='x',label="Waypoints")
-        plt.plot(self.waypoints[:, 0], self.waypoints[:, 1], 'r', alpha=0.2)
+        ax.scatter(self.waypoints[0,0], self.waypoints[0,1], s=100, c='k',  label="Start")
+        ax.scatter(self.waypoints[-1,0], self.waypoints[-1,1], s=100, c='r', label="End")
+        ax.scatter(self.waypoints[:, 0], self.waypoints[:, 1], c='b', marker='x',label="Waypoints")
+        ax.plot(self.waypoints[:, 0], self.waypoints[:, 1], 'r', alpha=0.2)
         
         # Plot the trajectory
-        plt.scatter(self.even_trajectory[:, 0], self.even_trajectory[:, 1], s=2, marker='.', label="Trajectory")
+        ax.scatter(self.even_trajectory[:, 0], self.even_trajectory[:, 1], s=2, marker='.', label="Trajectory", rasterized=True)
         
-        for p_obst, r_obst in self.obstacles:
+        for idx, obs in enumerate(self.obstacles):
+            p_obst, r_obst = obs
             circle = plt.Circle((p_obst[0], p_obst[1]), r_obst, color='r', alpha=0.5)
-            plt.gca().add_patch(circle)
+            ax.add_patch(circle)
+            ax.text(p_obst[0], p_obst[1], idx+1, fontsize=12)
         # Plot the trajectories
-        plt.scatter(self.wall_up[:, 0], self.wall_up[:, 1], s=2, marker='o', label='Shifted Up')
-        plt.scatter(self.wall_down[:, 0], self.wall_down[:, 1], s=2, marker='o', label='Shifted Down')
+        ax.scatter(self.wall_up[:, 0], self.wall_up[:, 1], s=2, marker='o', rasterized=True)
+        ax.scatter(self.wall_down[:, 0], self.wall_down[:, 1], s=2, marker='o', rasterized=True)
 
         # plt.scatter(query_point[0], query_point[1], s=100, marker='x', label='Query Point')
         # plt.scatter(trajectories[closest_trajectory_index][closest_point_index, 0], trajectories[closest_trajectory_index][closest_point_index, 1], s=100, marker='x', label='Closest Point')
 
-        plt.scatter(self.start_line[:, 0], self.start_line[:, 1], s=2, marker='.', label='Start Line')
-        plt.scatter(self.end_line[:, 0], self.end_line[:, 1], s=2, marker='.', label='End Line')
+        ax.scatter(self.start_line[:, 0], self.start_line[:, 1], s=2, marker='.', rasterized=True)
+        ax.scatter(self.end_line[:, 0], self.end_line[:, 1], s=2, marker='.', rasterized=True)
         
         if self.plot_error:
-            plt.scatter(self.query_point[0], self.query_point[1], s=10, marker='x', label='Query Point')
-            plt.scatter(self.closest_point_to_trajectory[0], self.closest_point_to_trajectory[1], s=10, marker='o', label='Closest Point')
-            plt.plot((self.query_point[0], self.s_global[0]), (self.query_point[1], self.s_global[1]), 'b--', label="cross-track error")
-            plt.plot((self.s_global[0], self.closest_point_to_trajectory[0]), (self.s_global[1], self.closest_point_to_trajectory[1]), 'b--', linewidth=1, label="along-track error")
+            ax.scatter(self.query_point[0], self.query_point[1], s=10, marker='x', label='Query Point')
+            ax.scatter(self.closest_point_to_trajectory[0], self.closest_point_to_trajectory[1], s=10, marker='o', label='Closest Point')
+            ax.plot((self.query_point[0], self.s_global[0]), (self.query_point[1], self.s_global[1]), 'b--', label="cross-track error")
+            ax.plot((self.s_global[0], self.closest_point_to_trajectory[0]), (self.s_global[1], self.closest_point_to_trajectory[1]), 'b--', linewidth=1, label="along-track error")
         
-        plt.legend()
-        plt.xlabel("x")
-        plt.ylabel("y")
-        plt.title("Trajectory and Obstacles and boundary")
-        plt.axis("equal")
-        plt.grid()
+        # ax.legend()
+        # ax.xlabel("x")
+        # ax.ylabel("y")
+        # ax.title("Trajectory and Obstacles and boundary")
+        # ax.axis("equal")
+        # ax.grid()
         
         if if_yaw_angle:
             fig, ax = plt.subplots()
@@ -485,8 +531,9 @@ class Path():
         print(f"shape of waypoints: {self.waypoints.shape}")
         print(f"shape of even_trajectory: {self.even_trajectory.shape}")
         print(f"length of the reference trajectory: {round(self.trajectory_length_at_each_point[-1], 3)} m")
-        print(f"shape of trajectory_length_at_each_point: {self.trajectory_length_at_each_point.shape}")
+        print(f"shape of ghost_trajectory: {self.ghost_trajectory.shape}")
         print(f"shape of yaw_angles: {self.yaw_angles.shape}")
+        print(f"shape of ghost_yaw_angles: {self.ghost_yaw_angles.shape}")
         print(f"shape of obstacles in ndarray format: {self.obstacles_np.shape}")
         print(f"number of obstacles: {len(self.obstacles)}")
         print(f"shape of walls: {self.wall_up.shape}")
@@ -494,9 +541,10 @@ class Path():
     
     def reset(self):
         self.plot_error = False
+        self.ref_point_index = 0
         self.generate_path()
         self.generate_walls()
         if self.is_crossed():
             self.reset()
-        if self.is_waypoints_in_obstacles():
-            self.reset()
+        # if self.is_waypoints_in_obstacles():
+        #     self.reset()
