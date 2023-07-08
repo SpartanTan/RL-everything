@@ -72,21 +72,23 @@ def parse_args():
 
 class Agent(nn.Module):
     def __init__(self, envs:gym.vector.SyncVectorEnv):
-          super().__init__()
-          self.critic = nn.Sequential(
-               layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)), # input feature: 4, output feature: 64
-               nn.Tanh(),
-               layer_init(nn.Linear(64, 64)),
-               nn.Tanh(),
-               layer_init(nn.Linear(64, 1), std=1.0)
-          )
-          self.actor = nn.Sequential(
-               layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
-               nn.Tanh(),
-               layer_init(nn.Linear(64, 64)),
-               nn.Tanh(),
-               layer_init(nn.Linear(64, envs.single_action_space.n), std=0.01) # 0.01 make the probability of taking each action be similar
-          )
+        super().__init__()
+        self.critic = nn.Sequential(
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)), # input feature: 4, output feature: 64
+            nn.Tanh(),
+            layer_init(nn.Linear(64, 64)),
+            nn.Tanh(),
+            layer_init(nn.Linear(64, 1), std=1.0)
+        )
+        self.actor = nn.Sequential(
+            layer_init(nn.Linear(np.array(envs.single_observation_space.shape).prod(), 64)),
+            nn.Tanh(),
+            layer_init(nn.Linear(64, 64)),
+            nn.Tanh(),
+            layer_init(nn.Linear(64, envs.single_action_space.n), std=0.01) # 0.01 make the probability of taking each action be similar
+        )
+        self.actor_logstd = nn.Parameter(torch.zeros(1, np.prod(envs.single_action_space.shape))) # 2-dim vector, each dim is the logstd for each action
+          
 
     def get_value(self, x)->torch.Tensor:
         """
